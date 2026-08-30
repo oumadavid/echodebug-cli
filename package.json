@@ -24,7 +24,7 @@
   },
   "main": "./bin/echorun.js",
   "bin": {
-    "echorun": "./bin/echorun.js"
+    "echorun": "bin/echorun.js"
   },
   "files": [
     "bin",
