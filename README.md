@@ -30,8 +30,9 @@ You need a live n8n webhook. Deploy your own copy of the EchoDebug workflow (see
 
 1. **Flag:** `echorun --webhook https://… npm run build`
 2. **Env:** `ECHODEBUG_WEBHOOK_URL` (or `ECHODEBUG_WEBHOOK`)
-3. **Config file:** `~/.echodebugrc`
-4. **Interactive:** `echorun --setup`
+3. **`.env` file:** `ECHODEBUG_WEBHOOK_URL=https://…` in the current directory, a parent directory, or the CLI package folder
+4. **Config file:** `~/.echodebugrc`
+5. **Interactive:** `echorun --setup`
 
 `~/.echodebugrc` is JSON:
 
@@ -41,7 +42,7 @@ You need a live n8n webhook. Deploy your own copy of the EchoDebug workflow (see
 }
 ```
 
-`.env.example` documents the env var. This package does not load `.env` for you.
+Only the webhook keys are read from `.env`; other variables (like `DATABASE_URL`) are left alone.
 
 ### Your own n8n workflow
 

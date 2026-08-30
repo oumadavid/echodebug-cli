@@ -4,6 +4,7 @@ const path = require("path");
 const readline = require("readline");
 
 const RC_PATH = path.join(os.homedir(), ".echodebugrc");
+const PACKAGE_ROOT = path.resolve(__dirname, "..");
 
 function readRc() {
   try {
@@ -23,8 +24,65 @@ function writeRc(webhookUrl) {
   fs.writeFileSync(RC_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
+function stripQuotes(value) {
+  const v = String(value).trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+/** Read only webhook keys from a .env file. Does not mutate process.env. */
+function webhookFromEnvFile(filePath) {
+  try {
+    const text = fs.readFileSync(filePath, "utf8");
+    let url = null;
+    let alias = null;
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const value = stripQuotes(trimmed.slice(eq + 1));
+      if (key === "ECHODEBUG_WEBHOOK_URL" && value) url = value;
+      if (key === "ECHODEBUG_WEBHOOK" && value) alias = value;
+    }
+    return url || alias || null;
+  } catch {
+    return null;
+  }
+}
+
+function envFilesFromCwd(cwd = process.cwd()) {
+  const files = [];
+  let dir = path.resolve(cwd);
+  const { root } = path.parse(dir);
+  for (let i = 0; i < 8; i++) {
+    files.push(path.join(dir, ".env"));
+    if (dir === root || fs.existsSync(path.join(dir, ".git"))) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  files.push(path.join(PACKAGE_ROOT, ".env"));
+  return files;
+}
+
+function webhookFromDotenv() {
+  for (const file of envFilesFromCwd()) {
+    const value = webhookFromEnvFile(file);
+    if (value) return value;
+  }
+  return null;
+}
+
 /**
- * Resolution order: --webhook, ECHODEBUG_WEBHOOK_URL, ECHODEBUG_WEBHOOK, ~/.echodebugrc
+ * Resolution order: --webhook, ECHODEBUG_WEBHOOK_URL, ECHODEBUG_WEBHOOK,
+ * .env (cwd and parents, then the CLI package), ~/.echodebugrc
  */
 function resolveWebhook({ flag } = {}) {
   const fromFlag = typeof flag === "string" ? flag.trim() : "";
@@ -36,6 +94,9 @@ function resolveWebhook({ flag } = {}) {
     ""
   ).trim();
   if (fromEnv) return fromEnv;
+
+  const fromDotenv = webhookFromDotenv();
+  if (fromDotenv) return String(fromDotenv).trim();
 
   const fromRc = readRc();
   return fromRc ? String(fromRc).trim() : null;

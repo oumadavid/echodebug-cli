@@ -112,7 +112,7 @@ async function main() {
   const webhook = resolveWebhook({ flag: opts.webhook });
   if (!webhook) {
     console.error(
-      "echorun: no webhook configured. Set ECHODEBUG_WEBHOOK_URL, add ~/.echodebugrc, pass --webhook, or run `echorun --setup`."
+      "echorun: no webhook configured. Set ECHODEBUG_WEBHOOK_URL, add it to a .env file, add ~/.echodebugrc, pass --webhook, or run `echorun --setup`."
     );
     process.exit(result.code || 1);
   }

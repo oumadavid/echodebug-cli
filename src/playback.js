@@ -1,68 +1,24 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawnSync } = require("child_process");
 const playSound = require("play-sound");
 
-function decodeAudioUrl(audioUrl) {
-  if (!audioUrl || typeof audioUrl !== "string") {
-    throw new Error("No audio_url in webhook response");
-  }
+const REAL_PLAYERS = [
+  "ffplay",
+  "mpg123",
+  "mpg321",
+  "mplayer",
+  "afplay",
+  "cmdmp3",
+  "play",
+];
 
-  const dataUrl = audioUrl.match(/^data:audio\/(?:mpeg|mp3)(?:;[^,]*)?;base64,(.+)$/is);
-  if (dataUrl) {
-    return { buffer: Buffer.from(dataUrl[1], "base64"), ext: ".mp3" };
-  }
-
-  return { url: audioUrl, ext: guessExt(audioUrl) };
-}
-
-function guessExt(url) {
-  try {
-    const pathname = new URL(url).pathname.toLowerCase();
-    if (pathname.endsWith(".wav")) return ".wav";
-    if (pathname.endsWith(".ogg")) return ".ogg";
-    if (pathname.endsWith(".m4a")) return ".m4a";
-  } catch {
-    /* ignore */
-  }
-  return ".mp3";
-}
-
-async function materializeAudio(audioUrl) {
-  const decoded = decodeAudioUrl(audioUrl);
-  const mp3Path = path.join(os.tmpdir(), `echodebug-speak${decoded.ext}`);
-
-  if (decoded.buffer) {
-    fs.writeFileSync(mp3Path, decoded.buffer);
-    return mp3Path;
-  }
-
-  const res = await fetch(decoded.url);
-  if (!res.ok) {
-    throw new Error(`Could not download audio_url (HTTP ${res.status})`);
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
-  fs.writeFileSync(mp3Path, buf);
-  return mp3Path;
-}
-
-function playWithPlaySound(filePath) {
-  return new Promise((resolve, reject) => {
-    const player = playSound({});
-    player.play(filePath, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
-
-function playMp3Windows(mp3Path) {
-  const abs = path.resolve(mp3Path).replace(/'/g, "''");
-  const ps = `
+const PLAY_PS1 = `
+param([Parameter(Mandatory=$true)][string]$AudioPath)
 Add-Type -AssemblyName PresentationCore
+$full = (Resolve-Path -LiteralPath $AudioPath).Path
 $player = New-Object System.Windows.Media.MediaPlayer
-$player.Open([Uri]'${abs}')
+$player.Open([Uri]$full)
 $n = 0
 while (-not $player.NaturalDuration.HasTimeSpan -and $n -lt 80) {
   Start-Sleep -Milliseconds 100
@@ -79,40 +35,154 @@ $player.Stop()
 $player.Close()
 `.trim();
 
-  const r = spawnSync(
-    "powershell.exe",
-    ["-STA", "-NoProfile", "-NonInteractive", "-Command", ps],
-    { stdio: "inherit" }
-  );
-  return r.status === 0;
+function toError(err) {
+  if (err instanceof Error) return err;
+  if (err) return new Error(String(err));
+  return new Error("audio player exited with an error");
 }
 
-function playMp3Ffplay(mp3Path) {
-  const r = spawnSync(
-    "ffplay",
-    ["-nodisp", "-autoexit", "-loglevel", "quiet", mp3Path],
-    { stdio: "ignore" }
-  );
-  return r.status === 0;
-}
-
-async function playAudioUrl(audioUrl) {
-  const filePath = await materializeAudio(audioUrl);
-  process.stderr.write("EchoDebug: reading it aloud in this terminal…\n");
-
-  try {
-    await playWithPlaySound(filePath);
-    return;
-  } catch {
-    /* fall through to local players */
+function decodeAudio(audio) {
+  if (Buffer.isBuffer(audio)) {
+    return { buffer: audio, ext: ".mp3" };
+  }
+  if (!audio || typeof audio !== "string") {
+    throw new Error("No audio in webhook response");
   }
 
-  if (playMp3Ffplay(filePath)) return;
-  if (process.platform === "win32" && playMp3Windows(filePath)) return;
-
-  throw new Error(
-    "Could not play audio. Install ffmpeg (ffplay) or another player that play-sound supports."
+  const dataUrl = audio.match(
+    /^data:audio\/(?:mpeg|mp3|wav|ogg|mp4|m4a)(?:;[^,]*)?;base64,(.+)$/is
   );
+  if (dataUrl) {
+    const mime = audio.slice(5, audio.indexOf(";")).toLowerCase();
+    const ext =
+      mime.includes("wav") ? ".wav" :
+      mime.includes("ogg") ? ".ogg" :
+      mime.includes("m4a") || mime.includes("mp4") ? ".m4a" :
+      ".mp3";
+    return { buffer: Buffer.from(dataUrl[1], "base64"), ext };
+  }
+
+  if (/^[A-Za-z0-9+/=\s]+$/.test(audio) && audio.replace(/\s/g, "").length > 256 && !/^https?:\/\//i.test(audio)) {
+    return { buffer: Buffer.from(audio.replace(/\s/g, ""), "base64"), ext: ".mp3" };
+  }
+
+  if (/^https?:\/\//i.test(audio)) {
+    return { url: audio, ext: guessExt(audio) };
+  }
+
+  throw new Error("Unsupported audio payload");
+}
+
+function guessExt(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    if (pathname.endsWith(".wav")) return ".wav";
+    if (pathname.endsWith(".ogg")) return ".ogg";
+    if (pathname.endsWith(".m4a")) return ".m4a";
+  } catch {
+    /* ignore */
+  }
+  return ".mp3";
+}
+
+async function materializeAudio(audio, tmpDir) {
+  const decoded = decodeAudio(audio);
+  const filePath = path.join(tmpDir, `speak${decoded.ext}`);
+
+  if (decoded.buffer) {
+    fs.writeFileSync(filePath, decoded.buffer);
+    return filePath;
+  }
+
+  const res = await fetch(decoded.url);
+  if (!res.ok) {
+    throw new Error(`Could not download audio_url (HTTP ${res.status})`);
+  }
+  fs.writeFileSync(filePath, Buffer.from(await res.arrayBuffer()));
+  return filePath;
+}
+
+function playWithPlaySound(filePath, tmpDir) {
+  return new Promise((resolve, reject) => {
+    const instance = playSound({ players: REAL_PLAYERS });
+
+    if (instance.player) {
+      const options = {};
+      if (instance.player === "ffplay") {
+        options.ffplay = ["-nodisp", "-autoexit", "-loglevel", "quiet"];
+      }
+      const child = instance.play(filePath, options, (err) => {
+        if (err) reject(toError(err));
+        else resolve();
+      });
+      if (!child) {
+        reject(new Error("Unable to spawn audio player"));
+      }
+      return;
+    }
+
+    if (process.platform === "win32") {
+      playWithWindowsMediaPlayer(filePath, tmpDir, resolve, reject);
+      return;
+    }
+
+    reject(new Error("Couldn't find a suitable audio player"));
+  });
+}
+
+function playWithWindowsMediaPlayer(filePath, tmpDir, resolve, reject) {
+  const scriptPath = path.join(tmpDir, "play.ps1");
+  fs.writeFileSync(scriptPath, PLAY_PS1, "utf8");
+
+  const instance = playSound({ player: "powershell.exe" });
+  const child = instance.play(
+    filePath,
+    {
+      "powershell.exe": [
+        "-STA",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        scriptPath,
+      ],
+    },
+    (err) => {
+      if (err) reject(toError(err));
+      else resolve();
+    }
+  );
+  if (!child) {
+    reject(new Error("Unable to spawn powershell audio player"));
+  }
+}
+
+function cleanupTempDir(tmpDir) {
+  if (!tmpDir) return;
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Write audio to os.tmpdir(), play it with play-sound, then delete the temp files.
+ * Playback failures are reported and do not throw.
+ */
+async function playAudioUrl(audio) {
+  let tmpDir = null;
+  try {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "echodebug-"));
+    const filePath = await materializeAudio(audio, tmpDir);
+    process.stderr.write("EchoDebug: reading it aloud in this terminal…\n");
+    await playWithPlaySound(filePath, tmpDir);
+  } catch {
+    console.error("Audio playback failed — see text diagnosis above");
+  } finally {
+    cleanupTempDir(tmpDir);
+  }
 }
 
 module.exports = { playAudioUrl };
