@@ -5,6 +5,7 @@ const readline = require("readline");
 
 const RC_PATH = path.join(os.homedir(), ".echodebugrc");
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
+const DEFAULT_WEBHOOK = "https://jsninja.app.n8n.cloud/webhook/debug";
 
 function readRc() {
   try {
@@ -82,7 +83,8 @@ function webhookFromDotenv() {
 
 /**
  * Resolution order: --webhook, ECHODEBUG_WEBHOOK_URL, ECHODEBUG_WEBHOOK,
- * .env (cwd and parents, then the CLI package), ~/.echodebugrc
+ * .env (cwd and parents, then the CLI package), ~/.echodebugrc,
+ * then the shared demo default.
  */
 function resolveWebhook({ flag } = {}) {
   const fromFlag = typeof flag === "string" ? flag.trim() : "";
@@ -99,7 +101,9 @@ function resolveWebhook({ flag } = {}) {
   if (fromDotenv) return String(fromDotenv).trim();
 
   const fromRc = readRc();
-  return fromRc ? String(fromRc).trim() : null;
+  if (fromRc) return String(fromRc).trim();
+
+  return DEFAULT_WEBHOOK;
 }
 
 function ask(question) {
