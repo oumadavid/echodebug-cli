@@ -2,33 +2,87 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-function quoteForShell(arg) {
-  const s = String(arg);
-  if (process.platform === "win32") {
-    if (/^[A-Za-z0-9_\/:=.@+-]+$/.test(s)) return s;
-    return `"${s.replace(/"/g, '""')}"`;
+// cmd.exe metacharacters — see http://www.robvanderwoude.com/escapechars.php
+const WIN_META = /([()\][%!^"`<>&|;, *?])/g;
+
+function escapeWinCommand(arg) {
+  return String(arg).replace(WIN_META, "^$1");
+}
+
+function escapeWinArgument(arg) {
+  const raw = String(arg);
+  if (!WIN_META.test(raw) && !/[\s"]/.test(raw)) return raw;
+  let s = raw;
+  s = s.replace(/(?=(\\+?)?)\1"/g, "$1$1\\\"");
+  s = s.replace(/(?=(\\+?)?)\1$/, "$1$1");
+  s = `"${s}"`;
+  return s.replace(WIN_META, "^$1");
+}
+
+/**
+ * On Windows, spawn({ shell: false }) will not find `npm` because it is
+ * npm.cmd. Prefer PATHEXT matches (.exe/.cmd/…) over an extensionless shim
+ * that CreateProcess cannot run.
+ */
+function resolveCommand(command, cwd) {
+  if (process.platform !== "win32") return command;
+  if (/[/\\]/.test(command) || path.extname(command)) return command;
+
+  const exts = (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM")
+    .split(";")
+    .filter(Boolean)
+    .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`));
+  const dirs = [cwd, ...(process.env.PATH || "").split(path.delimiter)];
+
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const candidate = path.resolve(dir, command + ext);
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        /* ignore unreadable PATH entries */
+      }
+    }
   }
-  if (s === "") return "''";
-  if (/^[A-Za-z0-9_\/:=.@%+-]+$/.test(s)) return s;
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+  return command;
 }
 
 /**
  * Spawn `argv` as a child process, tee stdout/stderr to this terminal,
  * and return captured output plus exit code.
+ *
+ * Always passes command and args as an array. Unix uses shell: false.
+ * Windows uses shell: true only for non-.exe shims (npm.cmd, builtins like
+ * echo); each arg is cmd-escaped first because Node's shell:true path
+ * concatenates into `cmd /s /c "..."`, which would otherwise treat && as
+ * another command.
  */
 function runCommand(argv, cwd = process.cwd()) {
   if (!argv || !argv.length) {
     return Promise.reject(new Error("No command given."));
   }
 
-  const commandLine = argv.map(quoteForShell).join(" ");
+  let command = argv[0];
+  let args = argv.slice(1);
+  let useShell = false;
+
+  if (process.platform === "win32") {
+    command = resolveCommand(command, cwd);
+    useShell = !/\.(?:com|exe)$/i.test(command);
+    if (useShell) {
+      command = escapeWinCommand(command);
+      args = args.map(escapeWinArgument);
+    }
+  }
 
   return new Promise((resolve, reject) => {
-    const child = spawn(commandLine, {
+    const child = spawn(command, args, {
       cwd,
       env: process.env,
-      shell: true,
+      shell: useShell,
       windowsHide: true,
     });
 
