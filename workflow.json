@@ -1,9 +1,389 @@
 {
-  "_comment": "Placeholder for an exported n8n workflow. In n8n: duplicate your EchoDebug pipeline, then Export → Download, and replace this file. Import it on your own n8n Cloud (or self-hosted) instance, activate it, and copy the production webhook URL. Configure that URL with ECHODEBUG_WEBHOOK_URL, ~/.echodebugrc, --webhook, or `echorun --setup`. Expected POST JSON: { \"command\", \"error_log\", \"framework\" }. Expected response JSON: { \"root_cause_summary\", \"terminal_fix_command\", \"audio_url\" } (audio_url may be a data:audio/mpeg;base64 URL or an http(s) link).",
-  "name": "EchoDebug",
-  "nodes": [],
-  "connections": {},
+  "name": "EchoDebug Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "debug",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "403b3a8b-6748-4d97-b72c-4039da9e0cf9",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "934ec18c-d7c3-4a9a-b293-63267020deb4"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "claude-sonnet-4-6",
+          "mode": "id",
+          "value": "claude-sonnet-4-6"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this build/error log and identify the root cause.\n\nFramework: {{ $json.body.framework }}\n\nCommand: {{ $json.body.command }}\n\nError log:\n{{ $json.body.error_log }}"
+            }
+          ]
+        },
+        "options": {
+          "includeMergedResponse": true,
+          "system": "You are a debugging assistant. Given a raw stack trace or build error log, identify the root cause. Respond ONLY in strict JSON with these fields: root_cause_summary (1 sentence), spoken_explanation (2 conversational sentences, written to be read aloud), terminal_fix_command (a single copy-pasteable shell command that fixes it), cursor_prompt (a short instruction someone could paste into Cursor IDE to fix the underlying code).",
+          "maxTokens": 1024
+        }
+      },
+      "id": "36e12c7f-0f7c-4ca5-bc54-2dc0eaf34781",
+      "name": "Claude - Root Cause Analysis",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "2LMwEtgmVA7mNlLr",
+          "name": "Anthropic account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const text = ($json.merged_response ?? ($json.content && $json.content.find(c => c.type === 'text') ? $json.content.find(c => c.type === 'text').text : '') ?? '').trim();\nconst raw = text.replace(/^```(?:json)?\\s*/, '').replace(/\\s*```$/, '').trim();\nlet parsed = null;\nlet valid = false;\ntry { parsed = JSON.parse(raw); valid = true; } catch (e) { valid = false; }\nreturn {\n  json: {\n    valid,\n    root_cause_summary: (parsed && parsed.root_cause_summary) || '',\n    spoken_explanation: (parsed && parsed.spoken_explanation) || '',\n    terminal_fix_command: (parsed && parsed.terminal_fix_command) || '',\n    cursor_prompt: (parsed && parsed.cursor_prompt) || '',\n    raw_text: text,\n  },\n};"
+      },
+      "id": "d794ddd1-aa57-4b58-b568-02e9326a3d69",
+      "name": "Parse Claude JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "21722627-3c52-40ec-8bd5-558b0ef37514",
+      "name": "Valid JSON?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    root_cause_summary: $json.root_cause_summary || '',\n    spoken_explanation: $json.spoken_explanation || '',\n    terminal_fix_command: $json.terminal_fix_command || '',\n    cursor_prompt: $json.cursor_prompt || '',\n  },\n};"
+      },
+      "id": "e81accc5-e71c-4161-8359-0c319ab897b6",
+      "name": "Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "claude-sonnet-4-6",
+          "mode": "id",
+          "value": "claude-sonnet-4-6"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this build/error log and identify the root cause.\n\nFramework: {{ $(\"Webhook Trigger\").item.json.body.framework }}\n\nCommand: {{ $(\"Webhook Trigger\").item.json.body.command }}\n\nError log:\n{{ $(\"Webhook Trigger\").item.json.body.error_log }}\n\nReturn ONLY a valid JSON object. No markdown, no code fences, no preamble."
+            }
+          ]
+        },
+        "options": {
+          "includeMergedResponse": true,
+          "system": "You are a debugging assistant. Given a raw stack trace or build error log, identify the root cause. Respond ONLY in strict JSON with these fields: root_cause_summary (1 sentence), spoken_explanation (2 conversational sentences, written to be read aloud), terminal_fix_command (a single copy-pasteable shell command that fixes it), cursor_prompt (a short instruction someone could paste into Cursor IDE to fix the underlying code). Output ONLY the strict JSON object. Do NOT wrap it in markdown code fences, do NOT add any preamble, explanation, or trailing text. The entire response must be a single valid JSON object and nothing else.",
+          "maxTokens": 1024
+        }
+      },
+      "id": "cfa9dd0f-8d4d-4942-8bc8-00db2e809de1",
+      "name": "Claude - Strict Retry",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        896,
+        80
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "2LMwEtgmVA7mNlLr",
+          "name": "Anthropic account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const text = ($json.merged_response ?? ($json.content && $json.content.find(c => c.type === 'text') ? $json.content.find(c => c.type === 'text').text : '') ?? '').trim();\nconst raw = text.replace(/^```(?:json)?\\s*/, '').replace(/\\s*```$/, '').trim();\nlet parsed = null;\ntry { parsed = JSON.parse(raw); } catch (e) { parsed = null; }\nreturn {\n  json: {\n    valid: parsed !== null,\n    root_cause_summary: (parsed && parsed.root_cause_summary) || 'Unable to determine the root cause automatically.',\n    spoken_explanation: (parsed && parsed.spoken_explanation) || 'Sorry, I could not analyze this error automatically. Please review the raw error log for details.',\n    terminal_fix_command: (parsed && parsed.terminal_fix_command) || '',\n    cursor_prompt: (parsed && parsed.cursor_prompt) || '',\n    raw_text: text,\n  },\n};"
+      },
+      "id": "b53a92dc-7308-4c25-ba5b-c56af34b9970",
+      "name": "Parse Retry JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/pNInz6obpgDQGcFmaJgB",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "audio/mpeg"
+            },
+            {
+              "name": "xi-api-key",
+              "value": "YOUR_ELEVENLABS_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $('Analysis').item.json.spoken_explanation, model_id: \"eleven_turbo_v2_5\", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "6d5e5dd1-0374-459f-a9ca-8bc8ba2c64e8",
+      "name": "ElevenLabs TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1568,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const a = $('Analysis').item.json;\nlet audio_url = null;\ntry {\n  const item = $input.item;\n  const binKey = item.binary && Object.keys(item.binary)[0];\n  if (binKey) {\n    const buf = await this.helpers.getBinaryDataBuffer(0, binKey);\n    if (buf && buf.length) {\n      audio_url = 'data:audio/mpeg;base64,' + Buffer.from(buf).toString('base64');\n    }\n  }\n} catch (e) {\n  audio_url = null;\n}\nreturn {\n  json: {\n    root_cause_summary: a.root_cause_summary,\n    spoken_explanation: a.spoken_explanation,\n    terminal_fix_command: a.terminal_fix_command,\n    cursor_prompt: a.cursor_prompt,\n    audio_url,\n  },\n};\n"
+      },
+      "id": "01b23647-ff7d-4d1f-8e8c-cdd68b82c505",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "1adbd5f1-2f32-4870-8fae-d789535227a9",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2016,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Claude - Root Cause Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude - Root Cause Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse Claude JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Claude JSON": {
+      "main": [
+        [
+          {
+            "node": "Valid JSON?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid JSON?": {
+      "main": [
+        [
+          {
+            "node": "Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude - Strict Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analysis": {
+      "main": [
+        [
+          {
+            "node": "ElevenLabs TTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude - Strict Retry": {
+      "main": [
+        [
+          {
+            "node": "Parse Retry JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Retry JSON": {
+      "main": [
+        [
+          {
+            "node": "Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ElevenLabs TTS": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "a364f2be-7ded-45f3-a661-486a78d20b27",
   "meta": {
-    "instanceId": "replace-with-your-exported-n8n-workflow"
-  }
+    "templateCredsSetupCompleted": true,
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "instanceId": "e1246b2ba8f6d321c3cf8eec8fbc2f852ab994ff69bdb16c855867d2539c7414"
+  },
+  "nodeGroups": [
+    {
+      "id": "df5bb3a0-005e-4d71-91b4-3ced8cac449b",
+      "name": "Root Cause Analysis",
+      "nodeIds": [
+        "36e12c7f-0f7c-4ca5-bc54-2dc0eaf34781",
+        "d794ddd1-aa57-4b58-b568-02e9326a3d69",
+        "21722627-3c52-40ec-8bd5-558b0ef37514",
+        "cfa9dd0f-8d4d-4942-8bc8-00db2e809de1",
+        "b53a92dc-7308-4c25-ba5b-c56af34b9970",
+        "e81accc5-e71c-4161-8359-0c319ab897b6"
+      ],
+      "description": "Claude analyzes the error log and returns strict JSON; retries once with a stricter prompt if the first response is not valid JSON."
+    },
+    {
+      "id": "e7a1dcf9-29e7-4878-aeaa-0f53d88a18cc",
+      "name": "Voice & Response",
+      "nodeIds": [
+        "6d5e5dd1-0374-459f-a9ca-8bc8ba2c64e8",
+        "01b23647-ff7d-4d1f-8e8c-cdd68b82c505",
+        "1adbd5f1-2f32-4870-8fae-d789535227a9"
+      ],
+      "description": "Generates spoken audio via ElevenLabs and returns the full JSON payload to the caller."
+    }
+  ],
+  "id": "o48IKoLDLFGPGp6H",
+  "tags": []
 }
