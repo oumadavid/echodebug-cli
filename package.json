@@ -1,0 +1,39 @@
+{
+  "name": "echodebug-cli",
+  "version": "0.1.0",
+  "description": "Wrap any terminal command; on failure, send the error to a webhook for AI diagnosis and a spoken explanation.",
+  "keywords": [
+    "cli",
+    "debug",
+    "n8n",
+    "ai",
+    "voice"
+  ],
+  "license": "MIT",
+  "author": "David Ouma",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oumadavid/echodebug-cli.git"
+  },
+  "bin": {
+    "echorun": "./bin/echorun.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "workflow.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bin/echorun.js"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "play-sound": "^1.1.6"
+  }
+}

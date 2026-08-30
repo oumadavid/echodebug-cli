@@ -1,0 +1,9 @@
+{
+  "_comment": "Placeholder for an exported n8n workflow. In n8n: duplicate your EchoDebug pipeline, then Export → Download, and replace this file. Import it on your own n8n Cloud (or self-hosted) instance, activate it, and copy the production webhook URL. Configure that URL with ECHODEBUG_WEBHOOK_URL, ~/.echodebugrc, --webhook, or `echorun --setup`. Expected POST JSON: { \"command\", \"error_log\", \"framework\" }. Expected response JSON: { \"root_cause_summary\", \"terminal_fix_command\", \"audio_url\" } (audio_url may be a data:audio/mpeg;base64 URL or an http(s) link).",
+  "name": "EchoDebug",
+  "nodes": [],
+  "connections": {},
+  "meta": {
+    "instanceId": "replace-with-your-exported-n8n-workflow"
+  }
+}
